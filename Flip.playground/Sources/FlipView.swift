@@ -1,6 +1,9 @@
 import SpriteKit
 
+/// The view that holds the canvas were we draw. Each pixel is an instance of `SKShapeNode` that changes it's color on each frame.
 public class FlipView: SKView {
+  
+  let gridSize: Int!
   
   var currentFrameIndex: Int!
   var totalFrames: Int!
@@ -9,25 +12,32 @@ public class FlipView: SKView {
   let colorPalette: [NSColor]!
   
   let gutterSize: CGFloat = 2
-  let pixelSize: CGFloat = 28
-  let gridSize: Int
+  let pixelSize: CGFloat
   
-  let squareNodes: [SKShapeNode] = []
   var changedNodes: Set<PixelNode> = []
   var currentColor: Int!
   let emptyColor: Int = 0
   
-  var isPlaying = false
+  var currentTool: Tool
+  var copiedFrame: [Int]?
   
-  public init(gridSize: Int, withColorPalette palette: [NSColor] = NSColor.def) {
+  var isPlaying = false
+  var frameRate: Int
+  
+  var userHasClicked = false
+  
+  public init(gridSize: Int, pixelSize: Int = 13, withColorPalette palette: [NSColor] = NSColor.normal, frameRate: Int = 8) {
+    self.frameRate = frameRate
     self.gridSize = gridSize
     self.colorPalette = palette
+    self.pixelSize = CGFloat(pixelSize)
     self.currentFrameIndex = 0
     self.totalFrames = 1
     self.currentColor = 1
+    self.currentTool = .pencil
     
     let gutterSum = CGFloat(gridSize - 1) * gutterSize
-    let pixelSum = pixelSize * CGFloat(gridSize)
+    let pixelSum = self.pixelSize * CGFloat(gridSize)
     let totalSize = gutterSum + pixelSum
     super.init(frame: NSRect(x: 0, y: 0, width: totalSize, height: totalSize))
     
@@ -37,16 +47,22 @@ public class FlipView: SKView {
     scene.physicsWorld.gravity = CGVector.zero
     self.presentScene(scene)
     
-    self.populateScene()
+    self.populateScene(withGridSize: gridSize)
+    // Play start sound
+    let firstNode = nodes.first!
+    firstNode.run(SKAction.playSoundFileNamed("start.wav", waitForCompletion: false))
   }
   
   required public init?(coder decoder: NSCoder) {
-    self.gridSize = 0
     self.colorPalette = nil
+    self.gridSize = 0
+    self.currentTool = .pencil
+    self.pixelSize = 13
+    self.frameRate = 8
     super.init(coder: decoder)
   }
   
-  func populateScene() {
+  func populateScene(withGridSize gridSize: Int) {
     
     for index in 0...(gridSize * gridSize) - 1 {
       let positionX = CGFloat(index % gridSize) * (pixelSize + gutterSize)
@@ -64,10 +80,22 @@ public class FlipView: SKView {
   // MARK: - Pixel Drawing
   
   override public func mouseDown(with event: NSEvent) {
+    // Avoid drawing on first click
+    if !userHasClicked {
+      userHasClicked = true
+      return
+    }
     if let touchedNode = self.scene?.nodes(at: event.locationInWindow).first,
       let node = touchedNode as? PixelNode  {
-      node.setFrame(color: self.currentColor, atIndex: self.currentFrameIndex)
-      self.changedNodes.insert(node)
+      
+      if currentTool == .pencil {
+        node.setFrame(color: self.currentColor, atIndex: self.currentFrameIndex)
+        self.changedNodes.insert(node)
+      } else {
+        if let nodeIndex = self.nodes.firstIndex(of: node) {
+          self.propagateColor(originIndex: nodeIndex, color: self.currentColor)
+        }
+      }
     }
   }
 
@@ -88,17 +116,19 @@ public class FlipView: SKView {
   
   /// Erases all pixels on backspace keypress
   override public func keyDown(with event: NSEvent) {
-    print(event.keyCode)
-    
     switch event.keyCode {
       case 49: self.isPlaying ? self.stop() : self.play()
       case 51: self.emtpyNodes()
       case 0: self.colorAll()
+      case 2: self.duplicateFrame()
       case 30: self.newFrame()
       case 123: self.displayPreviousFrame()
       case 124: self.displayNextFrame()
       case 1: self.printAnimation()
       case 37:  self.load(animation: DefaultAnimation.test)
+      case 8: self.copyCurrentFrame()
+      case 9: self.pasteInCurrentFrame()
+      case 14: self.deleteCurrentFrame()
       default: break
     }
   }
@@ -106,9 +136,10 @@ public class FlipView: SKView {
   
   // MARK: Frames
   
-  func play(withFrameRate rate: Double = 8) {
+  func play() {
     self.allNodes { (node) in
-      node.play(frameDuration: 1/rate)
+      let fr = TimeInterval(self.frameRate)
+      node.play(frameDuration: 1/fr)
     }
     self.isPlaying = true
   }
@@ -121,10 +152,61 @@ public class FlipView: SKView {
     self.nodesDisplayFrame(index: self.currentFrameIndex)
   }
   
+  func propagateColor(originIndex origin: Int, color: Int) {
+    let originNode = self.nodes[origin]
+    let originalColor = originNode.fillColor
+    
+    var changedIndexes: Set<Int> = []
+    
+    func paintAdjacentPixels(origin: Int) {
+      let adjacentIndexes: [Int] = [
+        origin,
+        origin - self.gridSize,
+        origin - 1,
+        origin + 1,
+        origin + self.gridSize
+      ]
+      
+      for index in adjacentIndexes {
+        if self.nodes.indices.contains(index) &&
+          nodes[index].fillColor == originalColor &&
+          !changedIndexes.contains(index) { // If pixel exists, it is the original color and has not been changed already
+          nodes[index].setFrame(color: color, atIndex: self.currentFrameIndex)
+          changedIndexes.insert(index)
+          paintAdjacentPixels(origin: index)
+        }
+      }
+    }
+    paintAdjacentPixels(origin: origin) //Start propagation
+  }
+  
   func newFrame() {
     self.currentFrameIndex += 1
     self.totalFrames += 1
     self.emtpyNodes()
+  }
+  
+  func deleteCurrentFrame() {
+    if self.totalFrames > 1 {
+      self.allNodes { (node) in
+        if node.frames.contains(self.currentFrameIndex) {
+          node.frames.remove(at: self.currentFrameIndex)
+          node.displayFrame(index: 0)
+        }
+      }
+      self.currentFrameIndex = 0
+      self.totalFrames -= 1
+    }
+  }
+  
+  func duplicateFrame() {
+    self.allNodes { (node) in
+      if let color = node.colorIndex(atFrame: self.currentFrameIndex) {
+        node.setFrame(color: color, atIndex: self.currentFrameIndex + 1)
+      }
+    }
+    self.currentFrameIndex += 1
+    self.totalFrames += 1
   }
   
   func nodesDisplayFrame(index: Int) {
@@ -171,6 +253,22 @@ public class FlipView: SKView {
     print(mappedColors)
   }
   
+  func copyCurrentFrame() {
+    self.copiedFrame = self.nodes.map { $0.colorIndex(atFrame: self.currentFrameIndex)!}
+  }
+  
+  func pasteInCurrentFrame() {
+    for (index, color) in self.copiedFrame!.enumerated() {
+      if self.nodes.indices.contains(index) {
+        let node = self.nodes[index]
+        node.setFrame(color: color, atIndex: self.currentFrameIndex)
+      }
+    }
+  }
+  
+  /// Loads an predefined animation on the current canvas.
+  ///
+  /// - Parameter animation: An array containing an array of Int representing the color indexes (of a color palette) that each PixelNode in the canvas will go through.
   public func load(animation: [[Int]]) {
     if animation.isEmpty { return }
     for (index, node) in nodes.enumerated() {

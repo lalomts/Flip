@@ -1,5 +1,7 @@
 import AppKit
+import PlaygroundSupport
 
+/// A view controller that holds both the canvas FlipView and the TouchBar used to control it.
 public class FlipViewController: NSViewController, NSTouchBarDelegate, NSScrubberDataSource, NSScrubberDelegate {
   
   
@@ -19,8 +21,8 @@ public class FlipViewController: NSViewController, NSTouchBarDelegate, NSScrubbe
     let touchBar = NSTouchBar()
     touchBar.delegate = self
     touchBar.customizationIdentifier = .colorPickerTouchBar
-    touchBar.defaultItemIdentifiers = [.colorLabel, .colorScrubber, .fixedSpaceLarge, .playbackButton, .newFrameButton]
-    touchBar.customizationAllowedItemIdentifiers = [.colorLabel, .colorScrubber, .fixedSpaceLarge, .playbackButton, .newFrameButton]
+    touchBar.defaultItemIdentifiers = [.colorLabel, .colorScrubber,.toolSegmentedControl, .fixedSpaceLarge,.playbackButton, .newFrameButton]
+    touchBar.customizationAllowedItemIdentifiers = [.colorLabel, .colorScrubber,.toolSegmentedControl,.flexibleSpace,.playbackButton, .newFrameButton]
     return touchBar
   }
   
@@ -36,6 +38,11 @@ public class FlipViewController: NSViewController, NSTouchBarDelegate, NSScrubbe
       let label = NSTextField(labelWithString: "Colors:")
       viewItem.view = label
       return viewItem
+    
+    case NSTouchBarItem.Identifier.toolLabel:
+      let label = NSTextField(labelWithString: "Tool:")
+      viewItem.view = label
+      return viewItem
       
     case NSTouchBarItem.Identifier.colorScrubber:
       let scrubber = NSScrubber()
@@ -49,6 +56,18 @@ public class FlipViewController: NSViewController, NSTouchBarDelegate, NSScrubbe
       scrubber.selectedIndex = 1
       viewItem.view = scrubber
       return viewItem
+      
+    case NSTouchBarItem.Identifier.toolSegmentedControl:
+     
+      let bucket = NSImage(named: "bucket.pdf")!
+      let pencil = NSImage(named: "pencil.pdf")!
+      let control = NSSegmentedControl(images: [pencil, bucket], trackingMode: NSSegmentedControl.SwitchTracking.selectOne, target: nil, action: #selector(toolSelected(sender:)))
+      control.setWidth(65, forSegment: 0)
+      control.setWidth(65, forSegment: 1)
+      control.setSelected(true, forSegment: 0)
+      viewItem.view = control
+      return viewItem
+      
       
     case NSTouchBarItem.Identifier.playbackButton:
       guard let playImage = NSImage(named:NSImage.touchBarPlayTemplateName) else { return nil }
@@ -84,6 +103,13 @@ public class FlipViewController: NSViewController, NSTouchBarDelegate, NSScrubbe
   @objc func newFrameButtonTapped() {
     if let flipView = self.view as? FlipView {
       flipView.newFrame()
+    }
+  }
+  
+  @objc func toolSelected(sender: Any) {
+    if let control = sender as? NSSegmentedControl, let flipView = self.view as? FlipView {
+      //Change the tool depending on segmented control selection
+      flipView.currentTool = (control.selectedSegment == 0) ? .pencil : .bucket
     }
   }
   
